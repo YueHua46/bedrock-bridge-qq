@@ -95,6 +95,43 @@ chmod +x ./mcqq-bridge ./start.sh ./install.sh
 ./start.sh
 ```
 
+### Linux 无浏览器配置
+
+很多 Linux 服主是在 SSH 里部署，没有桌面浏览器。可以直接用 CLI 完成配置和行为包生成：
+
+```bash
+./mcqq-bridge init
+./mcqq-bridge config set qq.group_id 123456789
+./mcqq-bridge config set server.public_url http://YOUR_SERVER_IP:8080
+./mcqq-bridge config set qq.forward_prefix ""
+./mcqq-bridge config set onebot.ws_url ws://127.0.0.1:3001
+./mcqq-bridge config set onebot.http_url http://127.0.0.1:3000
+./mcqq-bridge pack generate ./mcqq-bridge-behavior-pack.mcpack
+./mcqq-bridge start
+```
+
+常用配置项：
+
+```text
+server.public_url              BDS 能访问到的 Bridge 地址
+minecraft.server_id            MC 服务器 ID，默认 survival
+qq.group_id                    目标 QQ 群号
+qq.forward_prefix              QQ 转 MC 前缀，默认空；设置成 /mc 可降低打扰
+onebot.ws_url                  OneBot WebSocket 地址
+onebot.http_url                OneBot HTTP 地址
+onebot.access_token            OneBot token
+features.mc_to_qq_chat         true/false
+features.qq_to_mc_chat         true/false
+```
+
+查看完整配置：
+
+```bash
+./mcqq-bridge config show
+```
+
+生成出的 `mcqq-bridge-behavior-pack.mcpack` 可以用 `scp`、服务器面板文件管理器，或在本地解压后复制到 BDS 世界的 `behavior_packs` 目录并启用。
+
 ## 构建发行文件
 
 仅构建二进制：

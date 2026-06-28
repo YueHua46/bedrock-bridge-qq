@@ -36,5 +36,20 @@ else
   echo "systemd service was not installed. Start manually with: ./start.sh"
 fi
 
-echo "Open the setup page from your browser:"
-echo "  http://127.0.0.1:8080/setup"
+cat <<'EOF'
+
+Next steps:
+
+1. Configure without a browser, for example:
+   ./mcqq-bridge config set qq.group_id 123456789
+   ./mcqq-bridge config set server.public_url http://YOUR_SERVER_IP:8080
+   ./mcqq-bridge config set qq.forward_prefix ""
+
+2. Generate the Bedrock behavior pack:
+   ./mcqq-bridge pack generate ./mcqq-bridge-behavior-pack.mcpack
+
+3. Copy the .mcpack or extracted behavior pack into your BDS world and enable it.
+
+If you have a browser, the Web UI is also available at:
+  http://127.0.0.1:8080/setup
+EOF

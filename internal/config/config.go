@@ -4,9 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -203,6 +205,67 @@ func Validate(cfg Config) error {
 		return errors.New("security.max_message_length must be at least 20")
 	}
 	return nil
+}
+
+func Set(cfg *Config, key, value string) error {
+	switch key {
+	case "server.host":
+		cfg.Server.Host = value
+	case "server.port":
+		port, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("server.port must be a number")
+		}
+		cfg.Server.Port = port
+	case "server.public_url":
+		cfg.Server.PublicURL = value
+	case "minecraft.server_id":
+		cfg.Minecraft.ServerID = value
+	case "minecraft.token":
+		cfg.Minecraft.Token = value
+	case "minecraft.poll_interval_ticks":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("minecraft.poll_interval_ticks must be a number")
+		}
+		cfg.Minecraft.PollIntervalTicks = n
+	case "qq.group_id":
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("qq.group_id must be a number")
+		}
+		cfg.QQ.GroupID = id
+	case "qq.forward_prefix":
+		cfg.QQ.ForwardPrefix = value
+	case "onebot.ws_url":
+		cfg.OneBot.WSURL = value
+	case "onebot.http_url":
+		cfg.OneBot.HTTPURL = value
+	case "onebot.access_token":
+		cfg.OneBot.AccessToken = value
+	case "features.mc_to_qq_chat":
+		v, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("features.mc_to_qq_chat must be true or false")
+		}
+		cfg.Features.MCToQQChat = v
+	case "features.qq_to_mc_chat":
+		v, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("features.qq_to_mc_chat must be true or false")
+		}
+		cfg.Features.QQToMCChat = v
+	case "security.max_message_length":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("security.max_message_length must be a number")
+		}
+		cfg.Security.MaxMessageLength = n
+	default:
+		return fmt.Errorf("unknown config key %q", key)
+	}
+	Normalize(cfg)
+	return Validate(*cfg)
 }
 
 func randomToken() string {

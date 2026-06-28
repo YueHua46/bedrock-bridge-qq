@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"mcqq-bridge/internal/doctor"
 	"mcqq-bridge/internal/logx"
 	"mcqq-bridge/internal/napcat"
+	"mcqq-bridge/internal/pack"
 	"mcqq-bridge/internal/store"
 )
 
@@ -42,6 +44,14 @@ func main() {
 		}
 	case "init":
 		if err := runInit(root); err != nil {
+			fatal(err)
+		}
+	case "config":
+		if err := runConfig(root, os.Args[2:]); err != nil {
+			fatal(err)
+		}
+	case "pack":
+		if err := runPack(root, os.Args[2:]); err != nil {
 			fatal(err)
 		}
 	case "doctor":
@@ -148,6 +158,69 @@ func runDoctor(root string) error {
 	return nil
 }
 
+func runConfig(root string, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: mcqq-bridge config show|set <key> <value>")
+	}
+	cfgPath := filepath.Join(root, "data", "config.yml")
+	cfg, err := config.LoadOrCreate(cfgPath)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "show":
+		data, err := os.ReadFile(cfgPath)
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(data))
+		return nil
+	case "set":
+		if len(args) < 3 {
+			return errors.New("usage: mcqq-bridge config set <key> <value>")
+		}
+		if err := config.Set(&cfg, args[1], args[2]); err != nil {
+			return err
+		}
+		if err := config.Save(cfgPath, cfg); err != nil {
+			return err
+		}
+		if err := napcat.WriteConfig(root, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("updated %s\n", args[1])
+		return nil
+	default:
+		return fmt.Errorf("unknown config command: %s", args[0])
+	}
+}
+
+func runPack(root string, args []string) error {
+	if len(args) == 0 || args[0] != "generate" {
+		return errors.New("usage: mcqq-bridge pack generate [output.mcpack]")
+	}
+	out := filepath.Join(root, "mcqq-bridge-behavior-pack.mcpack")
+	if len(args) >= 2 {
+		out = args[1]
+	}
+	cfg, err := config.LoadOrCreate(filepath.Join(root, "data", "config.yml"))
+	if err != nil {
+		return err
+	}
+	data, err := pack.Generate(cfg)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(out, data, 0644); err != nil {
+		return err
+	}
+	fmt.Printf("behavior pack written: %s\n", out)
+	return nil
+}
+
 func printHelp() {
 	fmt.Println(`MCQQ Bridge
 
@@ -155,6 +228,11 @@ Usage:
   mcqq-bridge start        Start HTTP service and OneBot connector
   mcqq-bridge bridge-only  Start without opening setup page
   mcqq-bridge init         Create default config and database
+  mcqq-bridge config show  Print data/config.yml
+  mcqq-bridge config set <key> <value>
+                           Update config without Web UI
+  mcqq-bridge pack generate [output.mcpack]
+                           Generate behavior pack without Web UI
   mcqq-bridge doctor       Run local diagnostics
   mcqq-bridge version      Print version`)
 }
