@@ -82,32 +82,70 @@ mcqq-bridge/
 └─ README.md
 ```
 
-## Linux 使用
+## Linux Docker Compose 一键部署
 
 ```bash
-chmod +x ./mcqq-bridge ./start.sh ./install.sh
-./install.sh
+cd deploy/compose
+cp .env.example .env
+vim .env
+./init.sh
 ```
 
-没有 root 或 systemd 时：
+至少修改：
+
+```env
+BRIDGE_PUBLIC_URL=http://YOUR_SERVER_IP:8080
+QQ_GROUP_ID=123456789
+```
+
+`init.sh` 会构建并启动两个服务：
+
+```text
+bridge  MCQQ Bridge、Web 配置页、行为包生成器
+napcat  QQ 登录和 OneBot v11 服务
+```
+
+常用入口：
 
 ```bash
-./start.sh
+./logs.sh
+./logs.sh bridge
+./logs.sh napcat
+./doctor.sh
+./generate-pack.sh
+```
+
+打开：
+
+```text
+Bridge Web UI: http://YOUR_SERVER_IP:8080/setup
+NapCat WebUI:  http://YOUR_SERVER_IP:6099/webui
+```
+
+行为包会生成到：
+
+```text
+deploy/compose/packs/mcqq-bridge-behavior-pack.mcpack
+```
+
+把这个行为包安装到 BDS 世界并启用即可。Linux 详细说明见：
+
+```text
+deploy/compose/README.md
 ```
 
 ### Linux 无浏览器配置
 
-很多 Linux 服主是在 SSH 里部署，没有桌面浏览器。可以直接用 CLI 完成配置和行为包生成：
+Docker Compose 版即使没有桌面浏览器，也可以在 SSH 里直接改配置：
 
 ```bash
-./mcqq-bridge init
-./mcqq-bridge config set qq.group_id 123456789
-./mcqq-bridge config set server.public_url http://YOUR_SERVER_IP:8080
-./mcqq-bridge config set qq.forward_prefix ""
-./mcqq-bridge config set onebot.ws_url ws://127.0.0.1:3001
-./mcqq-bridge config set onebot.http_url http://127.0.0.1:3000
-./mcqq-bridge pack generate ./mcqq-bridge-behavior-pack.mcpack
-./mcqq-bridge start
+cd deploy/compose
+docker compose exec bridge config show
+docker compose exec bridge config set qq.group_id 123456789
+docker compose exec bridge config set server.public_url http://YOUR_SERVER_IP:8080
+docker compose exec bridge config set qq.forward_prefix ""
+docker compose exec bridge pack generate /app/packs/mcqq-bridge-behavior-pack.mcpack
+docker compose restart bridge
 ```
 
 常用配置项：
