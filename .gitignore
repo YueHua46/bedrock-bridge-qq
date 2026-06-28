@@ -1,0 +1,17 @@
+/data/
+/logs/
+/dist/
+/packages/
+/work/
+/outputs/
+/napcat/
+*.exe
+/mcqq-bridge
+*.zip
+*.tar.gz
+*.sqlite
+*.db
+*.log
+*.mcpack
+.env
+*.bak
