@@ -91,3 +91,10 @@ docker compose restart bridge
 - BDS must be able to reach `BRIDGE_PUBLIC_URL`.
 - Do not use `127.0.0.1` for `BRIDGE_PUBLIC_URL` unless BDS is inside the same network namespace as Bridge.
 - The NapCat WebUI port `6099` should be protected by firewall rules if exposed to the public internet.
+
+## Security
+
+- Bridge now binds to `127.0.0.1:8080` by default. `init.sh` flips it to `0.0.0.0` inside the container so the published port works; expose `8080` only on a trusted network or behind a reverse proxy with auth.
+- Sensitive endpoints (`/api/setup/save`, `/api/pack/download`, `/api/status`, `/api/logs/recent`, `/api/onebot/test`) require `Authorization: Bearer <security.admin_token>`. The `/setup` page injects this token into its JS, so the Web UI keeps working; non-browser callers must send the header explicitly.
+- `/onebot/event` requires `Authorization: Bearer <onebot.access_token>` so third parties cannot inject forged QQ messages.
+- The admin token lives in `data/config.yml` (`security.admin_token`). Show it with `docker compose exec bridge config show`, or rotate it with `docker compose exec bridge config set security.admin_token "$(openssl rand -hex 24)"`.

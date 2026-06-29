@@ -62,6 +62,7 @@ func (a *App) render(w http.ResponseWriter, name string, data map[string]any) {
 		},
 	}).Parse(pageTemplate))
 	data["Page"] = name
+	data["AdminToken"] = a.cfg.Security.AdminToken
 	if err := tpl.Execute(w, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -135,7 +136,8 @@ const pageTemplate = `<!doctype html>
     <section>
       <h1>行为包</h1>
       <p class="muted">下载后把 mcpack 放进 BDS 世界的 behavior_packs，并在世界配置里启用该行为包。</p>
-      <a class="button" href="/api/pack/download">下载行为包</a>
+      <button onclick="downloadPack()">下载行为包</button>
+      <span id="packResult" class="muted"></span>
     </section>
     <section>
       <h2>当前内置配置</h2>
@@ -153,6 +155,10 @@ pollIntervalTicks: {{.Config.Minecraft.PollIntervalTicks}}</pre>
   {{end}}
   </main>
   <script>
+    const adminToken = {{json .AdminToken}};
+    function authHeaders(extra){
+      return Object.assign({Authorization: 'Bearer ' + adminToken}, extra || {});
+    }
     const cfg = {{json .Config}};
     async function save(){
       cfg.server.public_url = document.querySelector('#public_url').value;
@@ -163,12 +169,30 @@ pollIntervalTicks: {{.Config.Minecraft.PollIntervalTicks}}</pre>
       cfg.onebot.ws_url = document.querySelector('#ws_url').value;
       cfg.onebot.http_url = document.querySelector('#http_url').value;
       cfg.onebot.access_token = document.querySelector('#onebot_token').value;
-      const res = await fetch('/api/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+      const res = await fetch('/api/setup/save',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(cfg)});
       document.querySelector('#result').textContent = res.ok ? '已保存' : await res.text();
     }
     async function testQQ(){
-      const res = await fetch('/api/onebot/test',{method:'POST'});
+      const res = await fetch('/api/onebot/test',{method:'POST',headers:authHeaders()});
       document.querySelector('#result').textContent = res.ok ? '测试消息已发送' : await res.text();
+    }
+    async function downloadPack(){
+      try{
+        const res = await fetch('/api/pack/download',{headers:authHeaders()});
+        if(!res.ok){ document.querySelector('#packResult').textContent = '下载失败：' + await res.text(); return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'mcqq-bridge-behavior-pack.mcpack';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        document.querySelector('#packResult').textContent = '已开始下载';
+      }catch(err){
+        document.querySelector('#packResult').textContent = '下载失败：' + err;
+      }
     }
   </script>
 </body>

@@ -98,7 +98,8 @@ func WriteConfig(root string, cfg config.Config) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(target, data, 0644); err != nil {
+		// 0600: onebot11.json embeds onebot.access_token.
+		if err := os.WriteFile(target, data, 0600); err != nil {
 			return err
 		}
 	}
