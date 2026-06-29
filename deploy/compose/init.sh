@@ -20,6 +20,7 @@ docker compose up -d --build
 
 echo "Initializing Bridge config..."
 docker compose exec -T bridge init
+docker compose exec -T bridge config set server.host 0.0.0.0
 docker compose exec -T bridge config set onebot.ws_url ws://napcat:3001
 docker compose exec -T bridge config set onebot.http_url http://napcat:3000
 

@@ -31,6 +31,15 @@ type Options struct {
 	OpenBrowser bool
 }
 
+const (
+	redacted = "<redacted>"
+
+	maxConfigBody = 64 * 1024  // data/config.yml payload upper bound
+	maxMCBody     = 32 * 1024  // /api/mc/* event/ack/heartbeat
+	maxOneBotBody = 256 * 1024 // /onebot/event may carry forwarded media URLs
+	maxAckBatch   = 500        // /api/mc/ack ids per request
+)
+
 type App struct {
 	opt       Options
 	cfg       config.Config
@@ -105,16 +114,45 @@ func (a *App) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/pack", a.handlePackPage)
 	mux.HandleFunc("/doctor", a.handleDoctorPage)
 	mux.HandleFunc("/health", a.handleHealth)
-	mux.HandleFunc("/api/status", a.handleStatus)
-	mux.HandleFunc("/api/setup/save", a.handleSaveConfig)
-	mux.HandleFunc("/api/logs/recent", a.handleRecentLogs)
-	mux.HandleFunc("/api/pack/download", a.handlePackDownload)
-	mux.HandleFunc("/api/onebot/test", a.handleOneBotTest)
+	mux.HandleFunc("/api/status", a.requireAdmin(a.handleStatus))
+	mux.HandleFunc("/api/setup/save", a.requireAdmin(a.handleSaveConfig))
+	mux.HandleFunc("/api/logs/recent", a.requireAdmin(a.handleRecentLogs))
+	mux.HandleFunc("/api/pack/download", a.requireAdmin(a.handlePackDownload))
+	mux.HandleFunc("/api/onebot/test", a.requireAdmin(a.handleOneBotTest))
 	mux.HandleFunc("/api/mc/events", a.handleMCEvents)
 	mux.HandleFunc("/api/mc/pull", a.handleMCPull)
 	mux.HandleFunc("/api/mc/ack", a.handleMCAck)
 	mux.HandleFunc("/api/mc/heartbeat", a.handleMCHeartbeat)
-	mux.HandleFunc("/onebot/event", a.handleOneBotEvent)
+	mux.HandleFunc("/onebot/event", a.requireOneBot(a.handleOneBotEvent))
+}
+
+// requireAdmin guards endpoints that mutate Bridge state or expose secrets
+// (config, pack, logs, OneBot test, full status). The token is
+// security.admin_token. Because browsers cannot set a custom Authorization
+// header in a CSRF form/POST and cannot read cross-origin responses to fetch
+// the token, this also defeats CSRF without needing a separate token.
+func (a *App) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !security.BearerOK(r, a.cfg.Security.AdminToken) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h(w, r)
+	}
+}
+
+// requireOneBot guards the OneBot HTTP callback. NapCat sends the configured
+// access_token as a Bearer header, which proves the request really came from
+// the OneBot implementation and prevents third parties from injecting forged
+// group messages into Minecraft.
+func (a *App) requireOneBot(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !security.BearerOK(r, a.cfg.OneBot.AccessToken) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h(w, r)
+	}
 }
 
 func (a *App) handleHome(w http.ResponseWriter, r *http.Request) {
@@ -127,10 +165,16 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 	hb, hasHB, _ := a.opt.Store.LastHeartbeat(a.cfg.Minecraft.ServerID)
+	// Return a copy of the config with all long-lived secrets redacted so the
+	// status endpoint never leaks credentials through logs or proxies.
+	cfgOut := a.cfg
+	cfgOut.Minecraft.Token = redacted
+	cfgOut.OneBot.AccessToken = redacted
+	cfgOut.Security.AdminToken = redacted
 	writeJSON(w, map[string]any{
 		"version":          a.opt.Version,
 		"onebot_connected": a.onebot.Connected(),
-		"config":           a.cfg,
+		"config":           cfgOut,
 		"last_heartbeat":   hb,
 		"has_heartbeat":    hasHB,
 		"server_time":      time.Now(),
@@ -142,14 +186,26 @@ func (a *App) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBody)
 	var next config.Config
 	if err := json.NewDecoder(r.Body).Decode(&next); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid config body", http.StatusBadRequest)
 		return
+	}
+	// Preserve any secrets the UI did not echo back, so a stale page cannot
+	// silently blank admin/onebot/minecraft tokens.
+	if next.Security.AdminToken == "" {
+		next.Security.AdminToken = a.cfg.Security.AdminToken
+	}
+	if next.OneBot.AccessToken == "" {
+		next.OneBot.AccessToken = a.cfg.OneBot.AccessToken
+	}
+	if next.Minecraft.Token == "" {
+		next.Minecraft.Token = a.cfg.Minecraft.Token
 	}
 	config.Normalize(&next)
 	if err := config.Save(a.opt.ConfigPath, next); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "config save failed", http.StatusBadRequest)
 		return
 	}
 	a.cfg = next
@@ -214,6 +270,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMCBody)
 	var ev struct {
 		ServerID string `json:"server_id"`
 		Type     string `json:"type"`
@@ -226,7 +283,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 		Time    int64  `json:"time"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	if ev.ServerID != a.cfg.Minecraft.ServerID {
@@ -240,7 +297,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	first, err := a.opt.Store.MarkTrace(ev.TraceID, "mc")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if !first {
@@ -249,7 +306,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg := security.CleanMessage(ev.Message, a.cfg.Security.MaxMessageLength)
-	if msg == "" {
+	if msg == "" && ev.Type == "chat" {
 		writeJSON(w, map[string]any{"ok": true, "ignored": true})
 		return
 	}
@@ -261,7 +318,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		if err != nil {
 			a.opt.Store.Log("error", "send to QQ failed: "+err.Error())
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			http.Error(w, "send to QQ failed", http.StatusBadGateway)
 			return
 		}
 	}
@@ -269,6 +326,10 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleMCPull(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	if !security.BearerOK(r, a.cfg.Minecraft.Token) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -283,7 +344,7 @@ func (a *App) handleMCPull(w http.ResponseWriter, r *http.Request) {
 	}
 	msgs, err := a.opt.Store.Pull(serverID, 50)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{"messages": msgs})
@@ -298,20 +359,25 @@ func (a *App) handleMCAck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMCBody)
 	var req struct {
 		ServerID string   `json:"server_id"`
 		IDs      []string `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	if req.ServerID != a.cfg.Minecraft.ServerID {
 		http.Error(w, "server_id mismatch", http.StatusBadRequest)
 		return
 	}
+	if len(req.IDs) > maxAckBatch {
+		http.Error(w, "too many ids", http.StatusBadRequest)
+		return
+	}
 	if err := a.opt.Store.Ack(req.ServerID, req.IDs); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
@@ -326,20 +392,25 @@ func (a *App) handleMCHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMCBody)
 	var req struct {
 		ServerID      string `json:"server_id"`
 		OnlinePlayers int    `json:"online_players"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	if req.ServerID != a.cfg.Minecraft.ServerID {
 		http.Error(w, "server_id mismatch", http.StatusBadRequest)
 		return
 	}
+	if req.OnlinePlayers < 0 || req.OnlinePlayers > 100000 {
+		http.Error(w, "invalid online_players", http.StatusBadRequest)
+		return
+	}
 	if err := a.opt.Store.SaveHeartbeat(req.ServerID, req.OnlinePlayers); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
@@ -350,7 +421,7 @@ func (a *App) handleOneBotEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var msg onebot.GroupMessage
+	r.Body = http.MaxBytesReader(w, r.Body, maxOneBotBody)
 	var raw struct {
 		PostType    string `json:"post_type"`
 		MessageType string `json:"message_type"`
@@ -364,7 +435,7 @@ func (a *App) handleOneBotEvent(w http.ResponseWriter, r *http.Request) {
 		} `json:"sender"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	if raw.PostType == "message" && raw.MessageType == "group" {
@@ -372,7 +443,7 @@ func (a *App) handleOneBotEvent(w http.ResponseWriter, r *http.Request) {
 		if nick == "" {
 			nick = raw.Sender.Nickname
 		}
-		msg = onebot.GroupMessage{
+		msg := onebot.GroupMessage{
 			GroupID:    raw.GroupID,
 			UserID:     raw.UserID,
 			Nickname:   nick,

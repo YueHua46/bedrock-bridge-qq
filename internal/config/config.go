@@ -60,15 +60,16 @@ type FeaturesConfig struct {
 }
 
 type SecurityConfig struct {
-	MaxMessageLength   int  `yaml:"max_message_length" json:"max_message_length"`
-	RateLimitPerMinute int  `yaml:"rate_limit_per_minute" json:"rate_limit_per_minute"`
-	AllowQQCommands    bool `yaml:"allow_qq_commands" json:"allow_qq_commands"`
+	MaxMessageLength   int    `yaml:"max_message_length" json:"max_message_length"`
+	RateLimitPerMinute int    `yaml:"rate_limit_per_minute" json:"rate_limit_per_minute"`
+	AllowQQCommands    bool   `yaml:"allow_qq_commands" json:"allow_qq_commands"`
+	AdminToken         string `yaml:"admin_token" json:"admin_token"`
 }
 
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			Host:      "0.0.0.0",
+			Host:      "127.0.0.1",
 			Port:      8080,
 			PublicURL: "http://127.0.0.1:8080",
 		},
@@ -103,6 +104,7 @@ func Default() Config {
 			MaxMessageLength:   200,
 			RateLimitPerMinute: 30,
 			AllowQQCommands:    false,
+			AdminToken:         randomToken(),
 		},
 	}
 }
@@ -140,12 +142,14 @@ func Save(path string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	// 0600: config.yml embeds minecraft.token, onebot.access_token and
+	// security.admin_token. It must not be readable by other users on the host.
+	return os.WriteFile(path, data, 0600)
 }
 
 func Normalize(cfg *Config) {
 	if cfg.Server.Host == "" {
-		cfg.Server.Host = "0.0.0.0"
+		cfg.Server.Host = "127.0.0.1"
 	}
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080
@@ -186,14 +190,21 @@ func Normalize(cfg *Config) {
 	if cfg.Security.RateLimitPerMinute == 0 {
 		cfg.Security.RateLimitPerMinute = 30
 	}
+	if cfg.Security.AdminToken == "" {
+		cfg.Security.AdminToken = randomToken()
+	}
 }
 
 func Validate(cfg Config) error {
 	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 		return errors.New("server.port must be between 1 and 65535")
 	}
-	if _, err := url.ParseRequestURI(cfg.Server.PublicURL); err != nil {
+	u, err := url.Parse(cfg.Server.PublicURL)
+	if err != nil || u.Host == "" {
 		return errors.New("server.public_url must be a valid URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("server.public_url scheme must be http or https")
 	}
 	if cfg.Minecraft.Token == "" {
 		return errors.New("minecraft.token is required")
@@ -203,6 +214,9 @@ func Validate(cfg Config) error {
 	}
 	if cfg.Security.MaxMessageLength < 20 {
 		return errors.New("security.max_message_length must be at least 20")
+	}
+	if cfg.Security.AdminToken == "" {
+		return errors.New("security.admin_token is required")
 	}
 	return nil
 }
@@ -243,6 +257,8 @@ func Set(cfg *Config, key, value string) error {
 		cfg.OneBot.HTTPURL = value
 	case "onebot.access_token":
 		cfg.OneBot.AccessToken = value
+	case "security.admin_token":
+		cfg.Security.AdminToken = value
 	case "features.mc_to_qq_chat":
 		v, err := strconv.ParseBool(value)
 		if err != nil {

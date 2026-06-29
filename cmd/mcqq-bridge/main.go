@@ -214,7 +214,7 @@ func runPack(root string, args []string) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(out, data, 0644); err != nil {
+	if err := os.WriteFile(out, data, 0600); err != nil {
 		return err
 	}
 	fmt.Printf("behavior pack written: %s\n", out)

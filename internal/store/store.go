@@ -86,8 +86,10 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) MarkTrace(traceID, source string) (bool, error) {
+	// Empty trace_id previously meant "always first", which let any client
+	// omit the field and replay events indefinitely. Require it instead.
 	if traceID == "" {
-		return true, nil
+		return false, nil
 	}
 	res, err := s.db.Exec(
 		`insert or ignore into seen_traces(trace_id, source, created_at) values(?, ?, ?)`,
