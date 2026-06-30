@@ -134,7 +134,7 @@ const pageTemplate = `<!doctype html>
   {{else if eq .Page "pack"}}
     <section>
       <h1>行为包</h1>
-      <p class="muted">下载后把 mcpack 放进 BDS 世界的 behavior_packs，并在世界配置里启用该行为包。</p>
+      <p class="muted">行为包会写入当前 Bridge 访问地址、Minecraft Token 和服务器 ID。修改这些配置后，请重新下载并替换 BDS 世界里的行为包。</p>
       <a class="button" href="/api/pack/download">下载行为包</a>
     </section>
     <section>
@@ -164,7 +164,7 @@ pollIntervalTicks: {{.Config.Minecraft.PollIntervalTicks}}</pre>
       cfg.onebot.http_url = document.querySelector('#http_url').value;
       cfg.onebot.access_token = document.querySelector('#onebot_token').value;
       const res = await fetch('/api/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
-      document.querySelector('#result').textContent = res.ok ? '已保存' : await res.text();
+      document.querySelector('#result').textContent = res.ok ? '已保存；如果改了 Bridge 地址、服务器 ID 或 MC Token，请重新下载行为包' : await res.text();
     }
     async function testQQ(){
       const res = await fetch('/api/onebot/test',{method:'POST'});

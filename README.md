@@ -229,6 +229,8 @@ OneBot WebSocket Server: ws://127.0.0.1:3001
 4. 将行为包安装到 BDS 世界并启用。
 5. 确保 BDS 版本支持 `@minecraft/server-net`，并已开启脚本相关实验能力。
 
+行为包内会写入当前的 `server.public_url`、`minecraft.server_id` 和 `minecraft.token`。如果之后修改了这些配置，必须重新打开 `/pack` 下载行为包，并替换 BDS 世界里正在启用的旧行为包；否则 BDS 仍会拿旧 token 请求 Bridge，Bridge 日志会显示 `/api/mc/... status=401`。
+
 ## 消息规则
 
 - MC 聊天会转发到 QQ：`[MC] Steve：hello`
@@ -247,3 +249,5 @@ go run ./cmd/mcqq-bridge doctor
 ```bash
 ./mcqq-bridge doctor
 ```
+
+如果 BDS 控制台出现 `HTTP 401 unauthorized`，通常是行为包里的 token 和 `data/config.yml` 的 `minecraft.token` 不一致。重新下载并安装 `/pack` 里的行为包，然后重启 BDS。

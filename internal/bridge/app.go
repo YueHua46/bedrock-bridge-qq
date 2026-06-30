@@ -211,7 +211,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !security.BearerOK(r, a.cfg.Minecraft.Token) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		a.mcAuthError(w)
 		return
 	}
 	var ev struct {
@@ -230,7 +230,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ev.ServerID != a.cfg.Minecraft.ServerID {
-		http.Error(w, "server_id mismatch", http.StatusBadRequest)
+		a.mcServerIDError(w)
 		return
 	}
 	key := "mc:" + ev.Player.Name
@@ -270,7 +270,7 @@ func (a *App) handleMCEvents(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleMCPull(w http.ResponseWriter, r *http.Request) {
 	if !security.BearerOK(r, a.cfg.Minecraft.Token) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		a.mcAuthError(w)
 		return
 	}
 	serverID := r.URL.Query().Get("server_id")
@@ -278,7 +278,7 @@ func (a *App) handleMCPull(w http.ResponseWriter, r *http.Request) {
 		serverID = a.cfg.Minecraft.ServerID
 	}
 	if serverID != a.cfg.Minecraft.ServerID {
-		http.Error(w, "server_id mismatch", http.StatusBadRequest)
+		a.mcServerIDError(w)
 		return
 	}
 	msgs, err := a.opt.Store.Pull(serverID, 50)
@@ -295,7 +295,7 @@ func (a *App) handleMCAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !security.BearerOK(r, a.cfg.Minecraft.Token) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		a.mcAuthError(w)
 		return
 	}
 	var req struct {
@@ -307,7 +307,7 @@ func (a *App) handleMCAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ServerID != a.cfg.Minecraft.ServerID {
-		http.Error(w, "server_id mismatch", http.StatusBadRequest)
+		a.mcServerIDError(w)
 		return
 	}
 	if err := a.opt.Store.Ack(req.ServerID, req.IDs); err != nil {
@@ -323,7 +323,7 @@ func (a *App) handleMCHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !security.BearerOK(r, a.cfg.Minecraft.Token) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		a.mcAuthError(w)
 		return
 	}
 	var req struct {
@@ -335,7 +335,7 @@ func (a *App) handleMCHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ServerID != a.cfg.Minecraft.ServerID {
-		http.Error(w, "server_id mismatch", http.StatusBadRequest)
+		a.mcServerIDError(w)
 		return
 	}
 	if err := a.opt.Store.SaveHeartbeat(req.ServerID, req.OnlinePlayers); err != nil {
@@ -450,11 +450,47 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func (a *App) mcAuthError(w http.ResponseWriter) {
+	http.Error(w, "unauthorized: behavior pack token does not match current minecraft.token; regenerate and reinstall the MCQQ Bridge behavior pack", http.StatusUnauthorized)
+}
+
+func (a *App) mcServerIDError(w http.ResponseWriter) {
+	http.Error(w, "server_id mismatch: behavior pack serverId does not match current minecraft.server_id; regenerate and reinstall the MCQQ Bridge behavior pack", http.StatusBadRequest)
+}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusResponseWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	n, err := w.ResponseWriter.Write(data)
+	w.bytes += n
+	return n, err
+}
+
 func logMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		logger.Info("http request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start).String())
+		rec := &statusResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(rec, r)
+		status := rec.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		logger.Info("http request", "method", r.Method, "path", r.URL.Path, "status", status, "bytes", rec.bytes, "duration", time.Since(start).String())
 	})
 }
 

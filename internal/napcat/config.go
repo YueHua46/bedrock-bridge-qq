@@ -78,31 +78,74 @@ func WriteConfig(root string, cfg config.Config) error {
 		},
 	}
 
-	data, err := json.MarshalIndent(ob, "", "  ")
-	if err != nil {
-		return err
-	}
-
 	targets := []string{
 		filepath.Join(napcatDir, "config", "onebot11.json"),
 	}
 	shells, _ := filepath.Glob(filepath.Join(napcatDir, "NapCat*.Shell"))
 	for _, shell := range shells {
 		targets = append(targets, filepath.Join(shell, "config", "onebot11.json"))
+		accountFiles, _ := filepath.Glob(filepath.Join(shell, "config", "onebot11_*.json"))
+		targets = append(targets, accountFiles...)
 		nested, _ := filepath.Glob(filepath.Join(shell, "versions", "*", "resources", "app", "napcat", "config"))
 		for _, configDir := range nested {
 			targets = append(targets, filepath.Join(configDir, "onebot11.json"))
+			accountFiles, _ := filepath.Glob(filepath.Join(configDir, "onebot11_*.json"))
+			targets = append(targets, accountFiles...)
 		}
 	}
+	seen := map[string]bool{}
 	for _, target := range targets {
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(target, data, 0644); err != nil {
+		if err := writeOneBotConfig(target, ob); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func writeOneBotConfig(target string, ob oneBotConfig) error {
+	doc := map[string]any{}
+	if data, err := os.ReadFile(target); err == nil {
+		_ = json.Unmarshal(data, &doc)
+	}
+
+	network, _ := doc["network"].(map[string]any)
+	if network == nil {
+		network = map[string]any{}
+	}
+	network["httpServers"] = ob.Network.HTTPServers
+	if _, ok := network["httpSseServers"]; !ok {
+		network["httpSseServers"] = []any{}
+	}
+	network["httpClients"] = ob.Network.HTTPClients
+	network["websocketServers"] = ob.Network.WebSocketServers
+	network["websocketClients"] = ob.Network.WebSocketClients
+	if _, ok := network["plugins"]; !ok {
+		network["plugins"] = []any{}
+	}
+	doc["network"] = network
+
+	if _, ok := doc["musicSignUrl"]; !ok {
+		doc["musicSignUrl"] = ob.MusicSignURL
+	}
+	if _, ok := doc["enableLocalFile2Url"]; !ok {
+		doc["enableLocalFile2Url"] = ob.EnableLocalFile2URL
+	}
+	if _, ok := doc["parseMultMsg"]; !ok {
+		doc["parseMultMsg"] = ob.ParseMultMsg
+	}
+
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(target, data, 0644)
 }
 
 func portFromURL(raw string, fallback int) int {

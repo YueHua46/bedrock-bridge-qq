@@ -111,9 +111,19 @@ async function request(path, method, body) {
   return http.request(req);
 }
 
+async function requestOK(path, method, body) {
+  const res = await request(path, method, body);
+  if (!res || res.status < 200 || res.status >= 300) {
+    const status = res ? res.status : "no response";
+    const detail = res && res.body ? " " + res.body.trim() : "";
+    throw new Error(path + " HTTP " + status + detail);
+  }
+  return res;
+}
+
 async function postEvent(type, player, message) {
   try {
-    await request("/api/mc/events", HttpRequestMethod.Post, {
+    await requestOK("/api/mc/events", HttpRequestMethod.Post, {
       server_id: CONFIG.serverId,
       type,
       trace_id: traceId("mc"),
@@ -163,8 +173,7 @@ if (world.afterEvents.playerLeave) {
 
 system.runInterval(async () => {
   try {
-    const res = await request("/api/mc/pull?server_id=" + encodeURIComponent(CONFIG.serverId), HttpRequestMethod.Get);
-    if (!res || res.status < 200 || res.status >= 300) return;
+    const res = await requestOK("/api/mc/pull?server_id=" + encodeURIComponent(CONFIG.serverId), HttpRequestMethod.Get);
     const data = JSON.parse(res.body || "{}");
     const ids = [];
     for (const msg of data.messages || []) {
@@ -172,7 +181,7 @@ system.runInterval(async () => {
       ids.push(msg.id);
     }
     if (ids.length) {
-      await request("/api/mc/ack", HttpRequestMethod.Post, { server_id: CONFIG.serverId, ids });
+      await requestOK("/api/mc/ack", HttpRequestMethod.Post, { server_id: CONFIG.serverId, ids });
     }
   } catch (err) {
     console.warn("[MCQQ Bridge] pull failed: " + err);
@@ -181,7 +190,7 @@ system.runInterval(async () => {
 
 system.runInterval(async () => {
   try {
-    await request("/api/mc/heartbeat", HttpRequestMethod.Post, {
+    await requestOK("/api/mc/heartbeat", HttpRequestMethod.Post, {
       server_id: CONFIG.serverId,
       online_players: world.getPlayers().length
     });
